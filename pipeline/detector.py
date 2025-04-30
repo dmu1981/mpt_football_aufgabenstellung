@@ -1,14 +1,34 @@
+from ultralytics import YOLO
+import torch
+
+
 class Detector:
     def __init__(self):
-        self.name = "Detector" # Do not change the name of the module as otherwise recording replay would break!
+        self.name = "Detector"  # Do not change the name of the module, otherwise recording and replay will break!
+        self.model = YOLO("yolov8n-football.pt")  # loads YOLOv8 model
 
     def start(self, data):
-        # TODO: Implement start up procedure of the module
-        pass
+        '''
+        Attempts to run YOLO on GPU for better performance.
+        If GPU is unavailable, falls back to CPU (much slower but still functional).
+        Enables half precision on CUDA devices to reduce memory usage.
+        '''
+
+        print(f"{self.name}: Detector module started.")
+
+        if torch.cuda.is_available():
+            self.model.to('cuda')           # moves model to GPU
+            self.model.half()               # enables FP16 inference (faster/less memory)
+            self.device = 'cuda'
+        else:
+            print(f"{self.name}: CUDA not available. Falling back to CPU.")
+            self.device = 'cpu'
+
+        print(f"{self.name}: Model ready on {self.model.device}.")
 
     def stop(self, data):
-        # TODO: Implement shut down procedure of the module
-        pass
+        # placeholder
+        print(f"{self.name}: Detector module stopped.")
 
     def step(self, data):
         # TODO: Implement processing of a single frame
