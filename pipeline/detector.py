@@ -48,20 +48,24 @@ class Detector:
             retina_masks=False   # not needed
         )[0]                     # only first result in the list needed
 
+        boxes_with_scores = sorted(
+            [(box, float(box.conf.item())) for box in results.boxes],  # pairs box with confidence score
+            key=lambda x: x[1],  # sorts by confidence
+            reverse=True         # highest confidence first
+        )
+
         detections = []
         classes = []
 
         VALID_CLASSES = {0, 1, 2, 3}  # specifies relevant classes in case model changes in future
 
-        for box in results.boxes:
+        for box, score in boxes_with_scores:
             # each box contains one detection result from YOLO (coordinates, class, confidence)
 
             cls_id = int(box.cls.item())  # predicted class id (0 = ball, 1 = goalkeeper, 2 = player, 3 = referee)
 
             if cls_id not in VALID_CLASSES:
                 continue  # skip other classes, if there are any
-
-            score = float(box.conf.item())  # confidence score
 
             # class specific thresholds
             if cls_id == 0:         # ball
