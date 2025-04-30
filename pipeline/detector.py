@@ -1,11 +1,12 @@
 from ultralytics import YOLO
 import torch
+import numpy as np
 
 
 class Detector:
     def __init__(self):
-        self.name = "Detector"  # Do not change the name of the module, otherwise recording and replay will break!
-        self.model = YOLO("yolov8n-football.pt")  # loads YOLOv8 model
+        self.name = 'Detector'  # Do not change the name of the module, otherwise recording and replay will break!
+        self.model = YOLO('yolov8n-football.pt')  # loads YOLOv8 model
 
     def start(self, data):
         '''
@@ -31,26 +32,43 @@ class Detector:
         print(f"{self.name}: Detector module stopped.")
 
     def step(self, data):
-        # TODO: Implement processing of a single frame
-        # The task of the detector is to detect the ball, the goal keepers, the players and the referees if visible.
-        # A bounding box needs to be defined for each detected object including the objects center position (X,Y) and its width and height (W, H) 
-        # You can return an arbitrary number of objects 
-        
-        # Note: You can access data["image"] to receive the current image
-        # Return a dictionary with detections and classes
-        #
-        # Detections must be a Nx4 NumPy Tensor, one 4-dimensional vector per detection
-        # The detection vector itself is encoded as (X, Y, W, H), so X and Y coordinate first, then width and height of each detection box.
-        # X and Y coordinates are the center point of the object, so the bounding box is drawn from (X - W/2, Y - H/2) to (X + W/2, Y + H/2)
-        #
-        # Classes must be Nx1 NumPy Tensor, one scalar entryx per detection
-        # For each corresponding detection, the following mapping must be used
-        #   0: Ball
-        #   1: GoalKeeper
-        #   2: Player
-        #   3: Referee
+        '''
+        Runs YOLO detection on the current frame and returns bounding boxes and class IDs.
+        Called once per frame.
+        '''
+
+        image = data['image']    # gets current frame
+
+        results = self.model.predict(
+            source=image,
+            device=self.device,
+            imgsz=864,           # high resolution improves ball detection
+            conf=0.2,            # confidence threshold
+            verbose=False,
+            retina_masks=False   # not needed
+        )[0]                     # only first result in the list needed
+
+        detections = []
+        classes = []
+
+        for box in results.boxes:
+            # each box contains one detection result from YOLO (coordinates, class, confidence)
+
+            x_center, y_center, width, height = box.xywh[0].tolist()  # bounding box (center coordinates width, height)
+            cls_id = int(box.cls.item())  # predicted class id (0 = ball, 1 = goalkeeper, 2 = player, 3 = referee)
+            detections.append([x_center, y_center, width, height])  # adds bounding box to list
+            classes.append([cls_id])  # adds corresponding class id
+
+        # converts valid detections to np arrays
+        if detections:
+            detections = np.array(detections).astype(np.float32)  # x_center, y_center, width, height
+            classes = np.array(classes).astype(np.int32)          # class_id
+        else:
+            # returns empty arrays  if no detections are found
+            detections = np.zeros((0, 4), dtype=np.float32)
+            classes = np.zeros((0, 1), dtype=np.int32)
 
         return {
-            "detections": None,
-            "classes": None
+            "detections": detections,
+            "classes": classes
         }
