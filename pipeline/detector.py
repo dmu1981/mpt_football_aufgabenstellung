@@ -72,6 +72,11 @@ class Detector:
                     continue
 
             x_center, y_center, width, height = box.xywh[0].tolist()  # bounding box (center coordinates width, height)
+            
+            if cls_id == 0:     # shrinks bounding box of ball class by 30%
+                width *= 0.7
+                height *= 0.7
+
             detections.append([x_center, y_center, width, height])  # adds bounding box to list
             classes.append([cls_id])  # adds corresponding class id
 
