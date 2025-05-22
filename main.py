@@ -5,7 +5,7 @@ from pipeline.opticalflow import OpticalFlow
 from pipeline.tracker import Tracker
 from pipeline.shirtClassifier import ShirtClassifier
 
-recordMode = RRPlexMode.BYPASS
+recordMode = RRPlexMode.REPLAY
 
 shape = (960, 540)
 engine = Engine(
@@ -35,4 +35,10 @@ engine = Engine(
 
 data = { "video": 'videos/1.mp4' }
 signals = engine.run(data)
+
+y, x, channels = data["image"].shape
+
+print(y)
+print(x)
+print(channels)
 
