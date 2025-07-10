@@ -59,15 +59,20 @@ class Tracker:
         self.filters = []
         self.max_misses = 5
         self.dist_thresh = 50.0
+        self.frame_count = 0
 
     def start(self, data):
+        print("[Tracker] Tracking started.")
         self.filters = []
         Filter._next_id = 1
+        self.frame_count = 0
 
     def stop(self, data):
+        print("[Tracker] Tracking stopped.")
         self.filters = []
 
     def step(self, data):
+        self.frame_count += 1
         dets = np.asarray(data.get("detections", []), dtype=np.float32)
         classes = list(data.get("classes", []))
 
@@ -95,7 +100,7 @@ class Tracker:
 
         self.filters = [f for f in self.filters if not f.is_deleted(self.max_misses)]
 
-        return {
+        result = {
             "tracks": np.array([f.get_state() for f in self.filters], dtype=np.float32),
             "trackVelocities": np.array(
                 [f.get_velocity() for f in self.filters], dtype=np.float32
@@ -104,3 +109,13 @@ class Tracker:
             "trackClasses": [f.cls for f in self.filters],
             "trackIds": [f.id for f in self.filters],
         }
+
+        #  Print tracking result to console
+        print(f"\n--- Frame {self.frame_count} ---")
+        print("Tracks:", result["tracks"])
+        print("Velocities:", result["trackVelocities"])
+        print("Ages:", result["trackAge"])
+        print("Classes:", result["trackClasses"])
+        print("IDs:", result["trackIds"])
+
+        return result
