@@ -4,7 +4,15 @@ from pipeline.detector import Detector
 from pipeline.opticalflow import OpticalFlow
 from pipeline.tracker import Tracker
 from pipeline.shirtClassifier import ShirtClassifier
+import signal
+import sys
 
+def signal_handler(sig, frame):
+    print("\n⇨ Abbruch durch Benutzer, beende Programm.")
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
+        
 recordMode = RRPlexMode.BYPASS
 
 shape = (960, 540)
@@ -14,7 +22,7 @@ engine = Engine(
     recordReplayMultiplex(Detector(), RRPlexMode.REPLAY),
     recordReplayMultiplex(OpticalFlow(), RRPlexMode.REPLAY),
     recordReplayMultiplex(Tracker(), RRPlexMode.REPLAY),
-    recordReplayMultiplex(ShirtClassifier(), RRPlexMode.REPLAY),
+    recordReplayMultiplex(ShirtClassifier(), RRPlexMode.BYPASS),
     Display(historyBufferSize=1000)
     ],
   signals={
@@ -33,6 +41,7 @@ engine = Engine(
     "testout": int
   })
 
-data = { "video": 'videos/1.mp4' }
-signals = engine.run(data)
+data = { "video": 'videos/1.mp4',
+        "yolo_model_path": "modules/yolov8m-football.pt" }
 
+signals = engine.run(data)

@@ -1,36 +1,46 @@
+from ultralytics import YOLO
+import numpy as np    
+
 class Detector:
     def __init__(self):
         self.name = "Detector" # Do not change the name of the module as otherwise recording replay would break!
 
+        self.model = None
+
+
     def start(self, data):
-        # TODO: Implement start up procedure of the module
-        pass
+        model_path = data.get("yolo_model_path")
+        if model_path is None:
+            raise ValueError("YOLO model path not specified in data dictionary.")
+        self.model = YOLO(model_path)
 
     def stop(self, data):
-        # TODO: Implement shut down procedure of the module
         pass
 
+    
     def step(self, data):
-        # TODO: Implement processing of a single frame
-        # The task of the detector is to detect the ball, the goal keepers, the players and the referees if visible.
-        # A bounding box needs to be defined for each detected object including the objects center position (X,Y) and its width and height (W, H) 
-        # You can return an arbitrary number of objects 
-        
-        # Note: You can access data["image"] to receive the current image
-        # Return a dictionary with detections and classes
-        #
-        # Detections must be a Nx4 NumPy Tensor, one 4-dimensional vector per detection
-        # The detection vector itself is encoded as (X, Y, W, H), so X and Y coordinate first, then width and height of each detection box.
-        # X and Y coordinates are the center point of the object, so the bounding box is drawn from (X - W/2, Y - H/2) to (X + W/2, Y + H/2)
-        #
-        # Classes must be Nx1 NumPy Tensor, one scalar entryx per detection
-        # For each corresponding detection, the following mapping must be used
-        #   0: Ball
-        #   1: GoalKeeper
-        #   2: Player
-        #   3: Referee
+        image = data["image"]  # get current image 
 
-        return {
-            "detections": None,
-            "classes": None
-        }
+        # use YOLO on the image
+        results = self.model(image)[0]  #self.model(image) returns a list, we take the first one (current)
+
+        bboxes = []
+        classes = []
+
+        for box in results.boxes: #iterate through detected objects 
+            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()  # extract Bounding Box 
+            cls = int(box.cls.cpu().numpy())            # assign objekt to a class
+
+            #calculate center(as required), width and hight for each object so that .display can be able to draw a box around the objects 
+            x = (x1 + x2) / 2
+            y = (y1 + y2) / 2
+            w = x2 - x1
+            h = y2 - y1
+
+            bboxes.append([x, y, w, h]) #add to the list in a bounding box format (as required)
+            classes.append(cls)         #add to object classification the list 
+
+        return { #return in the right format
+            "detections": np.array(bboxes, dtype=np.float32),
+            "classes": np.array(classes, dtype=np.int32)
+         }
