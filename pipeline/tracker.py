@@ -1,56 +1,150 @@
-# Note: A typical tracker design implements a dedicated filter class for keeping the individual state of each track
-# The filter class represents the current state of the track (predicted position, size, velocity) as well as additional information (track age, class, missing updates, etc..)
-# The filter class is also responsible for assigning a unique ID to each newly formed track
+import numpy as np
+from scipy.optimize import linear_sum_assignment
+
+
+# Berechnet IoU (Intersection over Union) zwischen zwei Mengen an Bounding Boxes
+def iou_matrix(boxes1, boxes2):
+    if len(boxes1) == 0 or len(boxes2) == 0:
+        return np.zeros((len(boxes1), len(boxes2)))
+
+    # (X, Y, W, H) → (x1, y1) + (x2, y2)
+    boxes1 = np.array(boxes1)
+    boxes2 = np.array(boxes2)
+    a1 = boxes1[:, :2] - boxes1[:, 2:] / 2
+    a2 = boxes1[:, :2] + boxes1[:, 2:] / 2
+    b1 = boxes2[:, :2] - boxes2[:, 2:] / 2
+    b2 = boxes2[:, :2] + boxes2[:, 2:] / 2
+
+    # Schnittmenge berechnen
+    tl = np.maximum(a1[:, None], b1[None])
+    br = np.minimum(a2[:, None], b2[None])
+    wh = np.clip(br - tl, 0, None)
+    inter = wh[..., 0] * wh[..., 1]
+
+    area_a = boxes1[:, 2] * boxes1[:, 3]
+    area_b = boxes2[:, 2] * boxes2[:, 3]
+    union = area_a[:, None] + area_b[None] - inter
+    return inter / np.clip(union, 1e-6, None)
+
+
 class Filter:
-    def __init__(self, z, cls):
-        # TODO: Implement filter initializstion
-        pass
-        
-    # TODO: Implement remaining funtionality for an individual track
-    
-    
+    _next_id = 0  # globale ID-Nummer
+
+    def __init__(self, bbox, obj_class):
+        self.state = bbox.astype(float)  # [cx, cy, w, h]
+        self.velocity = np.zeros(2)  # [vx, vy]
+        self.cls = int(obj_class)
+        self.age = 1
+        self.missing = 0
+        self.id = Filter._next_id
+        Filter._next_id += 1
+
+    def predict(self, flow):
+        self.state[:2] += self.velocity - flow
+        self.age += 1
+        self.missing += 1
+
+    def update(self, bbox):
+        alpha = 0.6
+        beta = 0.15
+        innovation = bbox[:2] - self.state[:2]
+        self.state[:2] += alpha * innovation
+        self.velocity = (1 - beta) * self.velocity + beta * innovation
+        self.state[2:] = bbox[2:]
+        self.missing = 0
+
+    def to_bbox(self):
+        return self.state.copy()
+
+
 class Tracker:
-    def __init__(self):
-        self.name = "Tracker" # Do not change the name of the module as otherwise recording replay would break!
+    def __init__(self, iou_threshold=0.3):
+        self.tracks = []
+        self.iou_threshold = iou_threshold
+        self.max_missing = {0: 1, 1: 5, 2: 5, 3: 5}
+        self.vmax = {0: 120, 1: 50, 2: 50, 3: 50}
+        self.name = "Tracker"
 
     def start(self, data):
-        # TODO: Implement start up procedure of the module
-        pass
+        self.tracks = []
 
     def stop(self, data):
-        # TODO: Implement shut down procedure of the module
         pass
 
     def step(self, data):
-        # TODO: Implement processing of a detection list
-        # The task of the tracker module is to identify (temporal) consistent tracks out of the given list of detections
-        # The tracker maintains a list of known tracks which is initially empty. 
-        # The tracker then tries to associate all given detections from the detector to existing tracks. A meaningful metric needs to be defined
-        # to decide which detection should be associated with each track and which detections better stay unassigned.
-        # After the association step, one must handle there different cases:
-        #   1) Detections which have not beed associated with a track: For these, create a new filter class and initialize its state based on the detection 
-        #   2) Tracks which have a detection: The state of these can be updated based on the associated detection
-        #   3) Tracks which have no detection: It makes sense to allow for a few missing frames, nonetheless it is still necessary to predict the 
-        #      current filter state (e.g. based on the optical flow measurement and the object velocity). If too many frames are missing, the track can be deleted
+        detections = data.get("detections", np.empty((0, 4)))
+        classes = data.get("classes", np.empty((0, 1)))
+        flow = data.get("opticalFlow", np.zeros(2))
+        image = data.get("image", np.zeros((1080, 1920, 3)))
+        h, w = image.shape[:2]
 
-        # Note: You can access data["detections"] and data["classes"] to receive the current list of detections and their corresponding classes
-        # You must return a dictionary with the given fields:
-        #       "tracks":           A Nx4 NumPy Array containing a 4-dimensional state vector for each track. Similar to the detections, 
-        #                           the track state containts the center point (X,Y) as well as the bounding box width and height (W, H)
-        #       "trackVelocities":  A Nx2 NumPy Array with an additional velocity estimate (in pixels per frame) for each track
-        #       "trackAge":         A Nx1 List with the track age (number of total frames this track exists). The track age starts at 
-        #                           1 on track creation and increases monotonically by 1 per frame until the track is deleted.
-        #       "trackClasses":     A Nx1 List of classes associated with each track. Similar to detections, the following mapping must be used
-        #                               0: Ball
-        #                               1: GoalKeeper
-        #                               2: Player
-        #                               3: Referee
-        #       "trackIds":         A Nx1 List of unique IDs for each track. IDs must not be reused and be unique during the lifetime of the program. 
+        # 1. Vorhersage
+        for tr in self.tracks:
+            tr.predict(flow)
+
+        # 2. Kostenmatrix berechnen
+        predicted = np.array([tr.to_bbox() for tr in self.tracks])
+        cost = np.ones((len(self.tracks), len(detections)))
+        if len(predicted) > 0 and len(detections) > 0:
+            ious = iou_matrix(predicted, detections)
+            dist = np.linalg.norm(
+                predicted[:, None, :2] - detections[None, :, :2], axis=2
+            )
+            mask = dist < 160
+            cost[mask] = 1 - ious[mask]
+
+        # 3. Matching mit Hungarian
+        matches = []
+        unmatched_tracks = set(range(len(self.tracks)))
+        unmatched_dets = set(range(len(detections)))
+
+        if cost.size:
+            r, c = linear_sum_assignment(cost)
+            for tr_idx, det_idx in zip(r, c):
+                if (
+                    cost[tr_idx, det_idx] < (1 - self.iou_threshold)
+                    and self.tracks[tr_idx].cls == classes[det_idx]
+                ):
+                    matches.append((tr_idx, det_idx))
+                    unmatched_tracks.discard(tr_idx)
+                    unmatched_dets.discard(det_idx)
+
+        #  4. Update
+        for tr_idx, det_idx in matches:
+            self.tracks[tr_idx].update(detections[det_idx])
+
+        # 5. Neue Tracks erstellen
+        for di in unmatched_dets:
+            if self.tracks:
+                best_iou = iou_matrix(
+                    detections[di : di + 1],
+                    np.array([tr.to_bbox() for tr in self.tracks]),
+                ).max()
+                if best_iou > 0.45:
+                    continue
+            self.tracks.append(Filter(detections[di], classes[di]))
+
+        #  6. Alte Tracks entfernen
+        alive = []
+        for tr in self.tracks:
+            vmax = self.vmax.get(tr.cls, 50)
+            tr.velocity = np.clip(tr.velocity, -vmax, vmax)
+            if not self._is_on_field(tr, w, h):
+                continue
+            if tr.missing > self.max_missing.get(tr.cls, 5):
+                continue
+            alive.append(tr)
+        self.tracks = alive
+
+        # 7. Ausgabe
         return {
-            "tracks": None,
-            "trackVelocities": None,
-            "trackAge": None,
-            "trackClasses": None,
-            "trackIds": None
+            "tracks": np.array([tr.to_bbox() for tr in self.tracks]),
+            "trackVelocities": np.array([tr.velocity for tr in self.tracks]),
+            "trackAge": [tr.age for tr in self.tracks],
+            "trackClasses": [tr.cls for tr in self.tracks],
+            "trackIds": [tr.id for tr in self.tracks],
         }
 
+    def _is_on_field(self, tr, w, h):
+        cx, cy, bw, bh = tr.to_bbox()
+        return 0 <= cx <= w and 0 <= cy <= h and bw >= 2 and bh >= 2
